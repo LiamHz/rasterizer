@@ -4,10 +4,12 @@
 #include "model.h"
 #include "geometry.h"
 
-const TGAColor red      = TGAColor(255, 0,   0,   255);
-const TGAColor white    = TGAColor(255, 255, 255, 255);
-const TGAColor green    = TGAColor(0,   255, 0,   255);
+const TGAColor white = TGAColor(255, 255, 255, 255);
+const TGAColor red   = TGAColor(255, 0,   0,   255);
+const TGAColor green = TGAColor(0,   255, 0,   255);
+
 Model *model = NULL;
+
 const int width  = 800;
 const int height = 800;
 
@@ -52,64 +54,66 @@ void line(int x0, int y0, int x1, int y1, TGAImage &image, TGAColor color) {
 }
 
 void triangle(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color) {
-    // Bubble sort verticies by their y coords'
+    // Ignore deggenerate triangles
+    if (t0.y == t1.y && t0.y == t2.y) return;
+
+    // Bubble sort the verticies by y coord ascending
     if (t0.y > t1.y) std::swap(t0, t1);
+    if (t0.y > t2.y) std::swap(t0, t2);
     if (t1.y > t2.y) std::swap(t1, t2);
-    if (t0.y > t1.y) std::swap(t0, t1);
 
-    int total_height = t2.y-t0.y;
+    int total_height = t2.y - t0.y;
 
-    // Fill the triangle
-    for (int i=0; i<total_height; i++) {
-        // Conditionals allow for both halfs of the triangle
-        bool second_half = i > t1.y - t0.y || t1.y == t0.y;
-        int segment_height = second_half ? t2.y-t1.y : t1.y-t0.y;
+    for (int y=0; y<total_height; y++) {
+        // Use conditionals to accound for both triangle segments
+        bool second_half = y > t1.y - t0.y || t1.y == t0.y;
+        int segment_height = second_half ? t2.y - t1.y : t1.y - t0.y;
 
-        // Get the position of the left and right edge of the triangle segment
-        float alpha = (float) i / total_height;
-        float beta  = (float) (i - (second_half ? t1.y-t0.y : 0)) / segment_height;
-        Vec2i A =               t0 + (t2-t0)*alpha;
-        Vec2i B = second_half ? t1 + (t2-t1)*beta : t0 + (t1-t0)*beta;
-        if (A.x>B.x) std::swap(A, B);
+        // Get the position of the left and right edge of the triangle at ypos
+        float alpha = (float) y / total_height;
+        float beta  = (float)(y - (second_half ? t1.y - t0.y : 0))/segment_height;
+        Vec2i left =                t0 + (t2 - t0) * alpha;
+        Vec2i right = second_half ? t1 + (t2 - t1) * beta : t0 + (t1 - t0) * beta;
+        if (left.x > right.x) std::swap(left, right);
 
-        // Draw pixels connecting the left and right edge of the triangle
-        for (int j=A.x; j<=B.x; j++) {
-            image.set(j, t0.y+i, color);
+        // Line fill from left to right edge
+        for (int x=left.x; x <= right.x; x++) {
+            image.set(x, t0.y+y, color); // attention, due to int casts t0.y+i != A.y
         }
     }
-
-    line(t0.x, t0.y, t1.x, t1.y, image, red);
-    line(t1.x, t1.y, t2.x, t2.y, image, white);
-    line(t2.x, t2.y, t0.x, t0.y, image, green);
 }
 
 int main(int argc, char** argv) {
-    if (2 == argc) {
+    if (2==argc) {
         model = new Model(argv[1]);
     } else {
         model = new Model("obj/african_head.obj");
     }
 
     TGAImage image(width, height, TGAImage::RGB);
+    Vec3f light_dir(0,0,-1);
 
-    triangle(Vec2i(100, 700), Vec2i(200, 400), Vec2i(50, 70), image, white);
+    // Model rendering
+    // Draw lines read from coords in wavefront obj
+    for (int i=0; i<model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j=0; j<3; j++) {
+            Vec3f v = model->vert(face[j]);
+            screen_coords[j] = Vec2i((v.x+1.)*width/2., (v.y+1.)*height/2.);
+            world_coords[j]  = v;
+        }
+        Vec3f n = (world_coords[2]-world_coords[0])^(world_coords[1]-world_coords[0]);
+        n.normalize();
+        float intensity = n*light_dir;
+        if (intensity>0) {
+            triangle(screen_coords[0], screen_coords[1], screen_coords[2], image, TGAColor(intensity*255, intensity*255, intensity*255, 255));
+        }
+    }
 
-    // // Wireframe rendering
-    // // Draw lines read from coords in wavefront obj
-    // for (int i=0; i < model -> nfaces(); i++) {
-    //     std::vector<int> face = model->face(i);
-    //     for (int j=0; j < 3; j++) {
-    //         Vec3f v0 = model -> vert(face[j]);
-    //         Vec3f v1 = model -> vert(face[(j+1)%3]);
-    //         int x0 = (v0.x+1.0) * width / 2.0;
-    //         int y0 = (v0.y+1.0) * width / 2.0;
-    //         int x1 = (v1.x+1.0) * width / 2.0;
-    //         int y1 = (v1.y+1.0) * width / 2.0;
-    //         line(x0, y0, x1, y1, image, white);
-    //     }
-    // }
-
-    image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
+    image.flip_vertically();
     image.write_tga_file("output.tga");
+    delete model;
     return 0;
 }
